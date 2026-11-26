@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Previsão de Preço de Combustíveis</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Estimativa de Preço de Combustíveis</h1>
+      <p>Modelo Random Forest (ONNX) treinado com dados históricos da ANP</p>
+    </header>
+
+    <form id="form-predicao" class="card">
+      <div class="grid">
+        <div class="campo">
+          <label for="data">Data da Consulta</label>
+          <input type="date" id="data" name="data" required />
+        </div>
+
+        <div class="campo">
+          <label for="estado">Estado (UF)</label>
+          <select id="estado" name="estado" required>
+            <option value="">Carregando...</option>
+          </select>
+        </div>
+
+        <div class="campo">
+          <label for="produto">Combustível</label>
+          <select id="produto" name="produto" required>
+            <option value="">Carregando...</option>
+          </select>
+        </div>
+
+        <div class="campo">
+          <label for="bandeira">Bandeira do Posto</label>
+          <select id="bandeira" name="bandeira" required>
+            <option value="">Carregando...</option>
+          </select>
+        </div>
+      </div>
+
+      <button type="submit" id="btn-prever">Calcular Preço Estimado</button>
+    </form>
+
+    <section id="resultado" class="card resultado oculto">
+      <span class="label-preco">Preço Médio Estimado</span>
+      <strong id="valor-preco" class="preco">R$ 0,00</strong>
+      <p id="detalhes-entrada" class="detalhes"></p>
+    </section>
+
+    <div id="erro" class="alerta-erro oculto"></div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
