@@ -1,0 +1,58 @@
+name: Build ECR & Trigger AWS Batch Training
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'train.py'
+      - 'Dockerfile'
+      - '.github/workflows/mlops-pipeline.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: gasoline-training-model
+  JOB_DEFINITION: jobdef-gasoline-training
+  JOB_QUEUE: queue-gasoline-ondemand
+
+jobs:
+  build-and-train:
+    name: Build Docker & Submit Batch Job
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Autenticar na AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::247332612706:role/github-actions-mlops-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build e Push da imagem Docker para o ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Submeter Job de Treinamento no AWS Batch
+        run: |
+          JOB_NAME="treino-onnx-$(date +%Y%m%d-%H%M%S)"
+          echo "Submetendo job: $JOB_NAME"
+          
+          aws batch submit-job \
+            --job-name "$JOB_NAME" \
+            --job-queue "$JOB_QUEUE" \
+            --job-definition "$JOB_DEFINITION" \
+            --container-overrides '{"vcpus": 16, "memory": 128000}'
