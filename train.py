@@ -1,10 +1,11 @@
 import os
 import glob
 import gc
+import json
+import shutil
 import boto3
 import numpy as np
 import pandas as pd
-import json
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
@@ -16,6 +17,7 @@ from skl2onnx.common.data_types import FloatTensorType
 
 NOME_BUCKET = os.environ.get('BUCKET_NAME', 'gasoline-regression-model-datalake')
 PASTA_LOCAL = './base_combustivel_local'
+
 
 def main():
     os.makedirs(PASTA_LOCAL, exist_ok=True)
@@ -39,7 +41,7 @@ def main():
         s3.download_file(NOME_BUCKET, key, caminho_destino)
 
     arquivos_csv = glob.glob(os.path.join(PASTA_LOCAL, '*.csv'))
-    
+
     # 2. Leitura e Concatenação
     lista_df = []
     for arquivo in arquivos_csv:
@@ -60,12 +62,16 @@ def main():
     df = pd.concat(lista_df, ignore_index=True)
     df = df.loc[:, ~df.columns.duplicated()]
     del lista_df
+    shutil.rmtree(PASTA_LOCAL, ignore_errors=True)
     gc.collect()
 
     print(f'Base total unificada! Registros: {len(df):,}')
 
     # 3. Pré-processamento
     df_clean = df.dropna(subset=['Valor de Venda']).copy()
+    del df
+    gc.collect()
+
     colunas_para_remover = [
         'Valor de Compra', 'Complemento', 'CNPJ da Revenda',
         'Nome da Rua', 'Numero Rua', 'Bairro', 'Cep', 'Revenda',
@@ -116,19 +122,28 @@ def main():
     # 4. Divisão e Treinamento
     y = df_clean['Valor de Venda'].astype(np.float32)
     X = df_clean.drop(columns=['Valor de Venda']).astype(np.float32)
+    colunas_modelo = X.columns.tolist()
+    num_features = len(colunas_modelo)
+
+    del df_clean
+    gc.collect()
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.20, random_state=42
     )
+    del X, y
+    gc.collect()
 
     print("Treinando Regressão Linear (Baseline)...")
     modelo_lr = LinearRegression(n_jobs=-1)
     modelo_lr.fit(X_train, y_train)
     y_pred_lr = modelo_lr.predict(X_test)
 
-    print("Treinando Random Forest Regressor (Base Total)...")
+    print("Treinando Random Forest Regressor (Base Total - Otimizado)...")
     modelo_rf = RandomForestRegressor(
-        n_estimators=100,
+        n_estimators=50,
+        max_depth=16,
+        min_samples_leaf=20,
         random_state=42,
         n_jobs=-1
     )
@@ -155,25 +170,28 @@ def main():
     print("\n--- TABELA COMPARATIVA DE DESEMPENHO ---")
     print(df_metricas.to_string(index=False))
 
+    # Libera arrays de treino/teste antes de serializar o ONNX
+    del X_train, X_test, y_train, y_test, y_pred_lr, y_pred_rf, modelo_lr
+    gc.collect()
+
     # 6. Exportação para Formato ONNX
     print("\nConvertendo o Random Forest para o formato ONNX...")
-    num_features = X_train.shape[1]
     tipo_entrada = [('float_input', FloatTensorType([None, num_features]))]
-    
     modelo_onnx = convert_sklearn(modelo_rf, initial_types=tipo_entrada)
 
     modelo_local = 'modelo_random_forest.onnx'
     with open(modelo_local, 'wb') as f:
         f.write(modelo_onnx.SerializeToString())
 
-    print(f"Modelo ONNX gerado localmente: {modelo_local}")
+    tamanho_mb = os.path.getsize(modelo_local) / (1024 * 1024)
+    print(f"Modelo ONNX gerado localmente: {modelo_local} ({tamanho_mb:.1f} MB)")
 
     # 7. Upload do Modelo ONNX e Metadados para o S3
     print(f"Fazendo upload do modelo ONNX para s3://{NOME_BUCKET}/modelo/{modelo_local}...")
     s3.upload_file(modelo_local, NOME_BUCKET, f'modelo/{modelo_local}')
 
     metadados = {
-        'colunas': X.columns.tolist(),
+        'colunas': colunas_modelo,
         'top_bandeiras': top_bandeiras.tolist()
     }
     arquivo_metadados = 'metadados_modelo.json'
@@ -184,6 +202,7 @@ def main():
     s3.upload_file(arquivo_metadados, NOME_BUCKET, f'modelo/{arquivo_metadados}')
 
     print("Treinamento e exportação ONNX concluídos com sucesso!")
+
 
 if __name__ == '__main__':
     main()
