@@ -2,12 +2,10 @@ name: Build ECR & Trigger AWS Batch Training
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
     paths:
       - 'train.py'
       - 'Dockerfile'
-      - '.github/workflows/mlops-pipeline.yml'
   workflow_dispatch:
 
 permissions:
